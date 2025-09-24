@@ -20,11 +20,13 @@ import io
 import re
 import base64
 from typing import List, Tuple, Optional, Dict
+import pathlib
 
 import requests
 from bs4 import BeautifulSoup
 import streamlit as st
 from transformers import pipeline
+import pathlib
 
 # ----------------------------- Page & Styling ----------------------------- #
 
@@ -115,18 +117,30 @@ T: Dict[str, str] = {
 # Sidebar controls
 st.sidebar.markdown("### ⚙️ Settings")
 
-# Space theme controls
-bg_upl = st.sidebar.file_uploader("Background image (space)", type=["png", "jpg", "jpeg"])  # drop your cosmos photo here
+# --- Space theme controls ---
+ASSETS = pathlib.Path(__file__).parent / "assets"
+bg_upl = st.sidebar.file_uploader("Background image (space)", type=["png", "jpg", "jpeg"])
 bg_url = st.sidebar.text_input("Background image URL (optional)")
-overlay = st.sidebar.slider("Background overlay", 0.0, 0.9, 0.6, 0.05)
+overlay = st.sidebar.slider("Background overlay", 0.0, 0.9, 0.0, 0.01)
 
+# Priority: uploaded > URL > local asset > default NASA URL
 if bg_upl is not None:
-    apply_space_theme(image_bytes=bg_upl.read(), image_url=None, overlay_alpha=overlay)
+    data = bg_upl.read()
+    try:
+        ASSETS.mkdir(parents=True, exist_ok=True)
+        (ASSETS / "bg.jpg").write_bytes(data)  # persist for next runs
+        st.sidebar.success("Saved as assets/bg.jpg — will load by default next time.")
+    except Exception:
+        st.sidebar.warning("Couldn't save to assets/. Using in-memory background only.")
+    apply_space_theme(image_bytes=data, image_url=None, overlay_alpha=overlay)
+elif bg_url:
+    apply_space_theme(image_bytes=None, image_url=bg_url.strip(), overlay_alpha=overlay)
+elif (ASSETS / "bg.jpg").exists():
+    apply_space_theme(image_bytes=(ASSETS / "bg.jpg").read_bytes(), image_url=None, overlay_alpha=overlay)
 else:
-    # Default to a Hubble Deep Field style image; user can override via URL or upload
     default_url = "https://www.nasa.gov/wp-content/uploads/2015/06/huDF2014-20140603a.jpg"
-    url = bg_url.strip() if bg_url else default_url
-    apply_space_theme(image_bytes=None, image_url=url, overlay_alpha=overlay)
+    apply_space_theme(image_bytes=None, image_url=default_url, overlay_alpha=overlay)
+
 
 # Model choice & lengths
 model_name = st.sidebar.selectbox(
@@ -240,12 +254,23 @@ def chunk_text(text: str, max_chars: int = 2000, overlap: int = 150) -> List[str
 
 
 def summarize_text(text: str, model: str, min_len: int, max_len: int) -> str:
+    # Guardrail for misconfigured lengths
+    if max_len <= min_len:
+        max_len = min_len + 20
+
     summarizer = get_summarizer(model)
     chunks = chunk_text(text)
-    summaries = []
-    for ch in chunks:
+
+    summaries: List[str] = []
+    progress = st.progress(0) if len(chunks) > 1 else None
+    for i, ch in enumerate(chunks, start=1):
         out = summarizer(ch, max_length=max_len, min_length=min_len, do_sample=False)
         summaries.append(out[0]["summary_text"])  # type: ignore
+        if progress:
+            progress.progress(i / len(chunks))
+    if progress:
+        progress.empty()
+
     combined = "\n\n".join(summaries)
     # Optional second pass to compress combined summary if it's long
     if len(combined) > 1500:
