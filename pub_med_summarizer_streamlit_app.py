@@ -289,6 +289,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# --- Share link (top of page) ---
+SHARE_URL = "https://pubmedsummerizer.streamlit.app/"
+st.success(f"Share this app: {SHARE_URL}")
+st.text_input("Copy link", value=SHARE_URL, disabled=True, label_visibility="collapsed")
+
 # Inputs
 q = st.text_input(T["query"], placeholder="e.g. CRISPR base editing delivery OR Alzheimer's tau PET")
 colA, colB, colC = st.columns([0.25, 0.25, 0.5])
